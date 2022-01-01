@@ -3,9 +3,6 @@ const API_ENDPOINT = "https://api.disneyapi.dev/characters";
 // Selectors
 const buttonSelector = document.querySelector("#button");
 const ouputSelector = document.querySelector("#output");
-const timeSelector = document.querySelector("#time");
-const princessSelector = document.querySelector("#princess");
-const vocalsSelector = document.querySelector("#vocals");
 const errorContainerSelector = document.querySelector("#error-container");
 const loaderSelector = document.querySelector("#loader");
 const buttonCtaSelector = document.querySelector("#cta");
@@ -32,6 +29,9 @@ const setButtonDisableState = (value) => {
   buttonCtaSelector.style.display = buttonCtaState;
 };
 
+const getAllDataFromResponses = (data) =>
+  data.map((response) => response.data.data);
+
 // Funcion que determina las ocurrencias; se transforma el nombre
 // a minúsculas y se utilizan expresiones regulares para determinar
 // la cantidad de ocurrencias al mismo tiempo que se suman a la variable
@@ -47,7 +47,7 @@ const getOcurrences = (princessOcurrences, name, vocalOcurrences) => {
 };
 
 const fetchMetaData = async () => {
-  let allData = [];
+  let allData;
   let output = [
     {
       time: 0,
@@ -65,40 +65,47 @@ const fetchMetaData = async () => {
   let princessOcurrences = 0;
   let vocalOcurrences = 0;
 
-  let morePagesAvailable = true;
-  let currentPage = 0;
-
   try {
     setLoaderState(true);
     setButtonDisableState(true);
     setButtonCta(false);
-    // Dado el sistema de paginación de la api se hacen consultas consecutivamente hasta
-    // pasar por todas las paginas (149 en este momento), en cada una de ellas se obtienen
-    // 50 personajes y se itera sobre ellos revisando uno por uno cuantas veces contienen
-    // en su nombre la palabra 'princess' y lo mismo con cada vocal, sumando esos números
-    // al resultado almacenado en la variable output.
-    while (morePagesAvailable) {
-      currentPage++;
-      const response = await fetch(`${API_ENDPOINT}?page=${currentPage}`);
-      let { data, totalPages } = await response.json();
-      // Se itera sobre cada uno de los 50 personajes de cada pagina
-      for (const character of data) {
-        // Se llama a la función que obtiene la cantidad de ocurrencias en el nombre
+
+    // Hace una primera llamada para checkear el total de páginas
+    let firstResponse = await axios.get("https://api.disneyapi.dev/characters");
+    const firstResponseData = firstResponse.data;
+    const totalPages = firstResponseData.totalPages;
+
+    // Se crea un objeto que almacena todas las solicitudes correspondientes a la cantidad
+    // de páginas que obtuvimos en la primera llamadda.
+    const pagesRequests = {};
+    for (let i = 1; i <= totalPages; i++) {
+      pagesRequests[i] = axios.get(`${API_ENDPOINT}?page=${i}`);
+    }
+    console.log({ pagesRequests });
+
+    await axios.all(Object.values(pagesRequests)).then(
+      axios.spread((...allResponses) => {
+        allData = getAllDataFromResponses(allResponses);
+      })
+    );
+
+    // Se itera sobre un arreglo de 149 arreglos de 50 elementos
+    for (const page of allData) {
+      // Se itera sobre cada uno de los 50 elementos calculando el número de ocurrencias
+      for (const character of page) {
         ({ princessOcurrences, vocalOcurrences } = getOcurrences(
           princessOcurrences,
           character.name,
           vocalOcurrences
         ));
       }
-      // Se almacenan todos los datos en una variable global (para revisión)
-      allData = [...allData, ...data];
-      morePagesAvailable = currentPage < totalPages;
     }
-    // Obtiene el tiempo transcurrido y asigna la cuenta de ocurrencias a su respectiva llave
-    const duration = Date.now() - start;
-    output[0].time = `${duration / 1000} s`;
+
+    // Asigna la cuenta de ocurrencias a su respectiva llave y obtiene el tiempo transcurrido.
     output[0].data[0]["count"] = princessOcurrences;
     output[0].data[1]["count"] = vocalOcurrences;
+    const duration = Date.now() - start;
+    output[0].time = `${duration / 1000} s`;
 
     // Se muestra en la página y se llevan a la consola la totalidad de los datos
     ouputSelector.innerHTML = JSON.stringify(output, undefined, 8);
